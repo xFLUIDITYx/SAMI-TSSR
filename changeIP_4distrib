@@ -1,0 +1,65 @@
+
+#!/bin/bash
+
+
+read -p $'do you know thecurrent IP of the interface you  wish to change? (y/n):\n' know
+
+if [[ "$know" = "n" ]]; then
+        my_ip=$(ip -o -4 addr show | awk '!/ lo |docker|br-|veth/ {print $2, $4}' | head -n1 | cut -d' ' -f2 | cut -d/ -f1)
+        my_mask=$(ip -o -4 addr show | awk '!/ lo |docker|br-|veth/ {print $4}' | head -n1 | cut -d'/' -f2)
+        my_gateway=$(ip route | grep default | awk '{print $3}')
+        echo -e "your ip config is:\n$my_ip\n$my_mask\n$my_gateway"
+        sleep 2
+elif [[ "$know" = "y" ]]; then
+        echo " good, you came prepare"
+        exit 1
+else
+        echo  "unrecognized input try again"
+fi
+
+# Récupérer la liste des interfaces (hors loopback)
+interfaces=($(ip -o link show | awk -F': ' '{print $2}' | grep -v lo))
+            #afficher ip       #crop after :          grep -v= ne pas affhicher
+echo "Interfaces réseau disponibles :"
+for i in "${!interfaces[@]}"; do   #for i = fait boucle plus incrementation/ incrementation vient sajouter devant mes interface
+  echo "$i) ${interfaces[$i]}"
+done
+sleep 2
+# Demander à l'utilisateur de choisir un numéro
+read -p "Choisissez une interface (numéro) : " choice
+
+# Vérifier que la saisie est valide
+if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 0 ] && [ "$choice" -lt "${#interfaces[@]}" ]; then
+                  #choix 0-9            choix en positif           # choix doit etre < au nombre d'interface
+  selected_iface=${interfaces[$choice]}
+  echo "Interface choisie : $selected_iface"
+  echo "$selected_iface"
+else
+  echo "Choix invalide."
+  exit 1
+fi
+
+read -p $'whats is the new addresses you wish to obtain?\n please use the format 123.456.789\n' ip_addresse
+read -p $' what is the new mask?\n please use the CIDR format in /24 format:\n' mask
+
+new_gateway="${ip_addresse%.*}.1"
+
+sudo tee /etc/netplan/00-config.yaml << EOF
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    $selected_iface:
+      dhcp4: false
+      addresses: [$ip_addresse/$mask]
+      routes:
+        - to: default
+          via: $new_gateway
+      nameservers:
+        addresses: [8.8.8.8, 8.8.4.4]
+EOF
+
+sudo systemctl enable systemd-networkd --now
+sudo netplan apply
+clear
+echo " your ip has been succefully changed to $ip_addresse"
